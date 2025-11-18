@@ -259,47 +259,6 @@ def get_image_size_for_seq(
 
 
 # --- Hydra Pool Classifier Head ---
-class IndexedAdd(Module):
-    """Indexed addition operation for Hydra roots."""
-
-    def __init__(
-        self,
-        n_indices: int,
-        dim: int,
-        weight_shape: tuple[int, ...] | None = None,
-        *,
-        inplace: bool = False,
-        device: torch.device | str | None = None,
-        dtype: torch.dtype | None = None,
-    ) -> None:
-        super().__init__()
-
-        self.dim = dim
-        self.inplace = inplace
-
-        self.index = Buffer(torch.empty(
-            2, n_indices,
-            device=device, dtype=torch.int32
-        ))
-
-        self.weight = Parameter(torch.ones(
-            *(sz if sz != -1 else n_indices for sz in weight_shape),
-            device=device, dtype=dtype
-        )) if weight_shape is not None else None
-
-    def forward(self, dst: Tensor, src: Tensor) -> Tensor:
-        src = src.index_select(self.dim, self.index[0])
-
-        if self.weight is not None:
-            src.mul_(self.weight)
-
-        return (
-            dst.index_add_(self.dim, self.index[1], src)
-            if self.inplace else
-            dst.index_add(self.dim, self.index[1], src)
-        )
-
-
 class BatchLinear(Module):
     """Batched linear layer for per-class transformations."""
 
@@ -401,51 +360,13 @@ class HydraPool(Module):
         self.head_dim = head_dim
         self.output_dim = output_dim
 
-        self._has_roots = False
         self._has_ff = False
 
-        self.q: Parameter | Buffer
-        self._q_normed: bool | None
-
-        # Handle roots (hierarchical tag structure)
-        if roots != (0, 0, 0):
-            self._has_roots = True
-            n_roots, n_classroots, n_subclasses = roots
-
-            if n_classroots < n_roots:
-                raise ValueError("Number of classroots cannot be less than the number of roots.")
-
-            self.cls = Parameter(torch.randn(
-                n_heads, n_classes, head_dim,
-                device=device, dtype=dtype
-            ))
-
-            self.roots = Parameter(torch.randn(
-                n_heads, n_roots, head_dim,
-                device=device, dtype=dtype
-            )) if n_roots > 0 else None
-
-            self.clsroots = IndexedAdd(
-                n_classroots, dim=-2, weight_shape=(n_heads, -1, 1),
-                device=device, dtype=dtype
-            ) if n_classroots > 0 else None
-
-            self.clscls = IndexedAdd(
-                n_subclasses, dim=-2, weight_shape=(n_heads, -1, 1),
-                inplace=True, device=device, dtype=dtype
-            ) if n_subclasses > 0 else None
-
-            self.q = Buffer(torch.empty(
-                n_heads, n_classes, head_dim,
-                device=device, dtype=dtype
-            ))
-            self._q_normed = None
-        else:
-            self.q = Parameter(torch.randn(
-                n_heads, n_classes, head_dim,
-                device=device, dtype=dtype
-            ))
-            self._q_normed = False
+        # Initialize query parameters (no roots for released models)
+        self.q = Parameter(torch.randn(
+            n_heads, n_classes, head_dim,
+            device=device, dtype=dtype
+        ))
 
         # Key-value projection
         self.kv = Linear(
@@ -487,57 +408,14 @@ class HydraPool(Module):
         )
         self.out_act = SwiGLU()
 
-    def get_extra_state(self) -> dict[str, Any]:
-        return {"q_normed": self._q_normed}
-
-    def set_extra_state(self, state: dict[str, Any]) -> None:
-        self._q_normed = state["q_normed"]
-
     def create_head(self) -> Module:
         if self.output_dim == 1:
             return Flatten(-2)
         return Mean(-1)
 
-    def _cache_query(self) -> None:
-        """Pre-compute and cache normalized queries for inference."""
-        assert not self.training
-
-        if self._q_normed:
-            return
-
-        with torch.no_grad():
-            self.q.to(device=self.kv.weight.device)
-            self.q.copy_(self._forward_q())
-            self._q_normed = True
-
-    def _forward_q(self) -> Tensor:
-        """Compute query vectors (with optional root composition)."""
-        match self._q_normed:
-            case None:
-                assert self._has_roots
-
-                if self.roots is not None:
-                    q = self.qk_norm(self.roots)
-                    q = self.clsroots(self.cls, q)
-                else:
-                    q = self.cls
-
-                if self.clscls is not None:
-                    q = self.clscls(q, q.detach())
-
-                q = self.qk_norm(q)
-                return q
-
-            case False:
-                assert not self._has_roots
-                return self.qk_norm(self.q)
-
-            case True:
-                return self.q
-
     def _forward_attn(self, x: Tensor, attn_mask: Tensor | None) -> tuple[Tensor, Tensor, Tensor]:
         """Compute cross-attention between queries and image patches."""
-        q = self._forward_q().expand(*x.shape[:-2], -1, -1, -1)
+        q = self.qk_norm(self.q).expand(*x.shape[:-2], -1, -1, -1)
 
         x = self.kv(x)
         k, v = rearrange(x, "... s (n h e) -> n ... h s e", n=2, e=self.head_dim).unbind(0)
@@ -584,15 +462,6 @@ class HydraPool(Module):
         n_heads, n_classes, head_dim = state_dict[f"{prefix}q"].shape
         attn_dim = n_heads * head_dim
 
-        roots_t = state_dict.get(f"{prefix}roots")
-        clsroots_t = state_dict.get(f"{prefix}clsroots.index")
-        clscls_t = state_dict.get(f"{prefix}clscls.index")
-        roots = (
-            roots_t.size(1) if roots_t is not None else 0,
-            clsroots_t.size(1) if clsroots_t is not None else 0,
-            clscls_t.size(1) if clscls_t is not None else 0
-        )
-
         input_dim = state_dict[f"{prefix}kv.weight"].size(1)
         output_dim = state_dict[f"{prefix}out_proj.weight"].size(2) // 2
 
@@ -606,7 +475,7 @@ class HydraPool(Module):
             head_dim,
             n_classes,
             mid_blocks=0,  # Simplified: no mid blocks
-            roots=roots,
+            roots=(0, 0, 0),  # No roots for released models
             ff_ratio=ff_ratio,
             ff_dropout=ff_dropout,
             input_dim=input_dim,
@@ -638,7 +507,7 @@ def sdpa_attn_mask(
     return mask
 
 
-# Patch timm's NAFlex attention mask function for JTP-3 compatibility
+# Use optimized attention mask function for JTP-3 inference
 timm.models.naflexvit.create_attention_mask = sdpa_attn_mask
 
 
@@ -698,7 +567,6 @@ def load_jtp3_model(
         )
         model.head = model.attn_pool.create_head()
         model.num_classes = len(tags)
-        state_dict["attn_pool._extra_state"] = {"q_normed": True}
     else:
         raise ValueError(f"Unsupported JTP-3 architecture suffix: {arch_suffix}")
 
@@ -707,9 +575,6 @@ def load_jtp3_model(
     model.eval().to(dtype=torch.bfloat16)
     model.load_state_dict(state_dict, strict=True)
     model.to(device=device)
-
-    # Cache queries for inference
-    model.attn_pool._cache_query()
 
     load_end_time = time.time()
     print(f"LoadJTP3: Model loaded in {load_end_time - load_start_time:.2f} seconds.")
@@ -810,9 +675,9 @@ def run_inference_jtp3(
     with torch.no_grad():
         logits = model(patches, coords, valid)
 
-    # Convert logits to probabilities and rescale to -1..1 range
-    probabilities = logits.float().sigmoid()[0]  # Remove batch dim
-    probabilities = (probabilities * 2.0) - 1.0  # Scale to -1..1 (1=present, 0=neutral, -1=absent)
+        # Convert logits to probabilities and rescale to -1..1 range
+        probabilities = logits.float().sigmoid()[0]  # Remove batch dim
+        probabilities = (probabilities * 2.0) - 1.0  # Scale to -1..1 (1=present, 0=neutral, -1=absent)
 
     end_inference = time.time()
     print(f"InferenceJTP3: Inference took {end_inference - start_inference:.3f} seconds.")
