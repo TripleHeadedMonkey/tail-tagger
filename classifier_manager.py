@@ -418,6 +418,11 @@ class ClassifierManager(QObject):
     @Slot(list)
     def _handle_worker_result(self, results):
         print("MainThread: Received analysis_finished signal from worker.")
+
+        # Apply tag overrides (blacklist/translation) before emitting
+        from tail_tagger.classifier_overrides import TagOverrideManager
+        results = TagOverrideManager.apply_overrides(results, self.active_model_id)
+
         self.analysis_finished.emit(results) # Relay the signal
 
     @Slot(str)

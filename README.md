@@ -100,6 +100,8 @@ Use whichever model(s) you prefer. JTP-3 is recommended for best results.
 
 Models are optional - the app provides full manual tagging functionality without them.
 
+**Customizing Model Output**: Each model can have its own `overrides.toml` configuration file to blacklist unwanted tags or translate tag names (see `overrides.toml.example` files in classifier folders).
+
 ## File Structure
 
 ```

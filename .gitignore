@@ -24,5 +24,8 @@ data/usage_data.json
 classifiers/**/*.safetensors
 classifiers/**/tags.json
 
+# User-specific classifier overrides (example files are tracked)
+classifiers/*/overrides.toml
+
 # Temp files
 *.tmp
