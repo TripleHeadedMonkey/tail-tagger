@@ -1,0 +1,41 @@
+# Tag Overrides for JTP_PILOT2 Classifier
+#
+# This file configures how classifier inference results are processed before display.
+# To use this file, copy/rename it to "overrides.toml" (remove the .example extension).
+#
+# Format notes:
+# - Tag names use underscores: "female_anthro" not "female anthro"
+# - Tag names are case-sensitive
+# - String values must be quoted: "dog" not dog
+# - Keys with special chars need quotes: "digital_media_(artwork)"
+
+# ============================================================================
+# TAG TRANSLATIONS
+# ============================================================================
+# Map original tag names to replacement tag names (one-to-one mapping)
+# Format: original_tag = "replacement_tag"
+#
+# Common use case: E621 renames one tag to another, but classifier was
+# trained after this change and outputs a different tag than what most 
+# furry image generation models were expecting. Allows for auto 'fix' 
+
+[translations]
+# Uncomment and modify examples as needed. Generally not needed for JTP_PILOT2:
+# pussy = "vulva"
+# canid = "canine"
+# felid = "feline"
+# "digital_media_(artwork)" = "digital_media"
+
+# ============================================================================
+# TAG BLACKLIST
+# ============================================================================
+# Tags to completely remove from inference results.
+# Useful for removing any tags you'll NEVER want to see in your results.
+
+[blacklist]
+tags = [
+    # Example for formatting:
+    # "example1",
+    # "example2",
+    # "example3",
+]
