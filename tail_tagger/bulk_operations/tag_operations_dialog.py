@@ -47,19 +47,21 @@ class BulkOperationWorker(QRunnable):
 class TagBulkOperationDialog(QDialog):
     """Dialog that shows progress during bulk tag operations."""
 
-    def __init__(self, parent, operation_type, tag_name, position=None):
+    def __init__(self, parent, operation_type, tag_name, position=None, target_tag=None):
         """Initialize the bulk operation dialog.
 
         Args:
             parent: Parent widget
-            operation_type (str): 'add_front', 'add_end', or 'remove'
+            operation_type (str): 'add_front', 'add_end', 'remove', or 'replace'
             tag_name (str): Name of the tag being operated on
             position (str, optional): 'front' or 'end' for add operations
+            target_tag (str, optional): Replacement tag name for replace operations
         """
         super().__init__(parent)
         self.operation_type = operation_type
         self.tag_name = tag_name
         self.position = position
+        self.target_tag = target_tag
         self.result = None
 
         self._setup_ui()
@@ -106,6 +108,9 @@ class TagBulkOperationDialog(QDialog):
             return f"Adding tag '{tag_display}' to the end of all images..."
         elif self.operation_type == 'remove':
             return f"Removing tag '{tag_display}' from all images..."
+        elif self.operation_type == 'replace':
+            target_display = self.target_tag.replace('_', ' ') if self.target_tag else '?'
+            return f"Replacing tag '{tag_display}' with '{target_display}' in all images..."
         else:
             return "Processing..."
 
@@ -129,6 +134,9 @@ class TagBulkOperationDialog(QDialog):
         elif self.operation_type == 'remove':
             operation_func = bulk_manager.remove_tag_from_all
             args = (folder_path, self.tag_name)
+        elif self.operation_type == 'replace':
+            operation_func = bulk_manager.replace_tag_in_all
+            args = (folder_path, self.tag_name, self.target_tag)
         else:
             return {'success': False, 'error': 'Unknown operation type'}
 
@@ -217,6 +225,14 @@ class TagBulkOperationDialog(QDialog):
             message = f"Tag '{tag_display}' removed from all images.\n\n"
             message += f"Total images: {total}\n"
             message += f"Removed from: {removed} images"
+        elif self.operation_type == 'replace':
+            target_display = self.target_tag.replace('_', ' ') if self.target_tag else '?'
+            replaced = result.get('replaced_count', 0)
+            total = result.get('total_images', 0)
+
+            message = f"Tag '{tag_display}' replaced with '{target_display}'.\n\n"
+            message += f"Total images: {total}\n"
+            message += f"Replaced in: {replaced} images"
         else:
             message = "Operation completed successfully."
 

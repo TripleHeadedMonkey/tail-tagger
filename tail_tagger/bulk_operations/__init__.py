@@ -7,6 +7,7 @@ in a folder at once, bypassing the normal image-by-image workflow for performanc
 Currently supports:
 - Adding tags to all images (front or end position)
 - Removing tags from all images
+- Replacing a tag with another tag in all images (preserving position)
 - Background thread execution with progress tracking
 - Automatic backups before modifications
 """
@@ -17,10 +18,12 @@ from .tag_operations_dialog import (
     BulkOperationWorker,
     WorkerSignals
 )
+from .replace_tag_dialog import ReplaceTagDialog
 
 __all__ = [
     'BulkOperationsManager',
     'TagBulkOperationDialog',
     'BulkOperationWorker',
     'WorkerSignals',
+    'ReplaceTagDialog',
 ]

@@ -42,7 +42,7 @@ from config_manager import ConfigManager
 from keyboard_manager import KeyboardManager
 from classifier_manager import ClassifierManager
 from tag_list_model import TagListModel, TagData
-from tail_tagger.bulk_operations import BulkOperationsManager, TagBulkOperationDialog
+from tail_tagger.bulk_operations import BulkOperationsManager, TagBulkOperationDialog, ReplaceTagDialog
 
 from left_panel_container import LeftPanelContainer
 from center_panel import CenterPanel
@@ -626,6 +626,40 @@ class MainWindow(QMainWindow):
         if result and result.get('success'):
             print(f"Bulk operation completed successfully. Reloading current image to sync UI.")
             # Reload current image to refresh tag state
+            if self.current_image_path:
+                self._load_and_display_image(self.current_image_path)
+
+    def start_replace_tag_operation(self, source_tag_name):
+        """Shows the replace tag dialog and executes the replacement if confirmed.
+
+        Args:
+            source_tag_name (str): Name of the tag to replace (stored with underscores)
+        """
+        if not self.last_folder_path:
+            QMessageBox.warning(
+                self,
+                "No Folder Loaded",
+                "Please open a folder before performing bulk operations."
+            )
+            return
+
+        dialog = ReplaceTagDialog(self, source_tag_name)
+        if dialog.exec() != ReplaceTagDialog.Accepted:
+            return
+
+        target_tag = dialog.get_target_tag()
+        if not target_tag:
+            return
+
+        source_display = source_tag_name.replace('_', ' ')
+        target_display = target_tag.replace('_', ' ')
+        print(f"Bulk replace: '{source_display}' → '{target_display}'")
+
+        progress_dialog = TagBulkOperationDialog(self, 'replace', source_tag_name, target_tag=target_tag)
+        result = progress_dialog.execute_operation(self.bulk_operations_manager, self.last_folder_path)
+
+        if result and result.get('success'):
+            print(f"Bulk replace completed successfully. Reloading current image to sync UI.")
             if self.current_image_path:
                 self._load_and_display_image(self.current_image_path)
 

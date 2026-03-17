@@ -40,7 +40,7 @@ class FrequentlyUsedPanel(TagListPanel):
 
     def _get_bulk_operations(self):
         """Returns list of allowed bulk operations for this panel."""
-        return ['add_front', 'add_end', 'remove']
+        return ['add_front', 'add_end', 'remove', 'replace']
 
     def _remove_tag_from_data_list(self, tag_data):
         """Not used in non-draggable panel."""
