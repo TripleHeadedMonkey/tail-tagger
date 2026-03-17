@@ -172,6 +172,74 @@ class BulkOperationsManager:
                 'error': str(e)
             }
 
+    def replace_tag_in_all(self, folder_path, source_tag, target_tag, progress_callback=None):
+        """Replaces a tag with another tag in all images, preserving position.
+
+        Args:
+            folder_path (str): Path to the image folder
+            source_tag (str): Tag name to replace
+            target_tag (str): Tag name to replace with
+            progress_callback (callable, optional): Callback function(phase, current, total, message)
+                where phase is 'init' or 'process'
+
+        Returns:
+            dict: Results with keys:
+                - 'success': bool
+                - 'replaced_count': number of images where the tag was replaced
+                - 'total_images': total images processed
+                - 'error': error message if success is False
+        """
+        try:
+            # Phase 1: Ensure workfile is complete
+            if progress_callback:
+                progress_callback('init', 0, 0, 'Initializing workfile...')
+
+            workfile_data, initialized = self.file_operations.ensure_workfile_complete(
+                folder_path,
+                progress_callback=lambda cur, total: progress_callback('init', cur, total, f'Loading image data... ({cur}/{total})') if progress_callback else None
+            )
+
+            if not workfile_data.get("image_tags"):
+                return {
+                    'success': False,
+                    'replaced_count': 0,
+                    'total_images': 0,
+                    'error': 'No images found in folder'
+                }
+
+            # Phase 2: Replace tag in all images
+            total_images = len(workfile_data["image_tags"])
+            replaced_count = 0
+
+            for index, (image_path, tags) in enumerate(workfile_data["image_tags"].items()):
+                if progress_callback:
+                    progress_callback('process', index + 1, total_images, f'Processing images... ({index + 1}/{total_images})')
+
+                if source_tag in tags:
+                    tags[tags.index(source_tag)] = target_tag
+                    replaced_count += 1
+
+            # Phase 3: Save workfile with backup
+            if progress_callback:
+                progress_callback('process', total_images, total_images, 'Saving changes...')
+
+            self._save_workfile_with_backup(folder_path, workfile_data)
+
+            return {
+                'success': True,
+                'replaced_count': replaced_count,
+                'total_images': total_images,
+                'error': None
+            }
+
+        except Exception as e:
+            return {
+                'success': False,
+                'replaced_count': 0,
+                'total_images': 0,
+                'error': str(e)
+            }
+
     def _save_workfile_with_backup(self, folder_path, workfile_data):
         """Saves workfile with a timestamped backup.
 

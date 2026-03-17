@@ -357,6 +357,13 @@ class TagListPanel(QWidget, ABC, metaclass=type('ABCMetaQWidget', (type(QWidget)
                 remove_action.triggered.connect(lambda: self.main_window.execute_bulk_operation('remove', tag_name))
                 bulk_menu.addAction(remove_action)
 
+            if 'replace' in bulk_ops:
+                bulk_menu.addSeparator()
+
+                replace_action = QAction("Replace in All Images...", self)
+                replace_action.triggered.connect(lambda: self.main_window.start_replace_tag_operation(tag_name))
+                bulk_menu.addAction(replace_action)
+
             actions_added = True  # Bulk operations count as actions
 
         # Only show menu if actions were added

@@ -339,5 +339,11 @@ class TagSearchPanel(QWidget):
         remove_action.triggered.connect(lambda: self.main_window.execute_bulk_operation('remove', tag_name))
         bulk_menu.addAction(remove_action)
 
+        bulk_menu.addSeparator()
+
+        replace_action = QAction("Replace in All Images...", self)
+        replace_action.triggered.connect(lambda: self.main_window.start_replace_tag_operation(tag_name))
+        bulk_menu.addAction(replace_action)
+
         # Show menu
         menu.popup(QCursor.pos())
