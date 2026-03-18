@@ -30,8 +30,15 @@ if [ ! -f "main.py" ]; then
     exit 1
 fi
 
-# Remove existing venv if it exists
+# Check for existing venv and confirm before deleting
 if [ -d "venv" ]; then
+    echo ""
+    echo "⚠️  WARNING: A virtual environment already exists."
+    read -p "Delete it and reinstall? [y/N]: " CONFIRM
+    if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
+        echo "Setup cancelled."
+        exit 0
+    fi
     echo "🗑️  Removing existing virtual environment..."
     rm -rf venv
 fi
