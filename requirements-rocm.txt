@@ -1,8 +1,8 @@
 # ROCm 6.4 (Linux only)
---extra-index-url https://download.pytorch.org/whl/rocm6.4
-torch==2.8.0
-torchvision==0.23.0
-torchaudio==2.8.0
+--extra-index-url https://download.pytorch.org/whl/rocm7.1
+torch==2.10.0
+torchvision==0.25.0
+torchaudio==2.10.0
 
 # Install remaining dependencies from requirements.txt
 -r requirements.txt

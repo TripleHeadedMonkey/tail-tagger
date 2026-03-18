@@ -33,8 +33,17 @@ if not exist "main.py" (
     exit /b 1
 )
 
-REM Remove existing venv if it exists
+REM Check for existing venv and confirm before deleting
 if exist "venv" (
+    echo.
+    echo WARNING: A virtual environment already exists.
+    set /p CONFIRM="Delete it and reinstall? [y/N]: "
+    set "CONFIRM=!CONFIRM: =!"
+    if /i not "!CONFIRM!"=="y" (
+        echo Setup cancelled.
+        pause
+        exit /b 0
+    )
     echo Removing existing virtual environment...
     rmdir /s /q venv
 )
