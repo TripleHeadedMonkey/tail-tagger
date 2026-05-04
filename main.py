@@ -357,6 +357,12 @@ class MainWindow(QMainWindow):
         print(f"Selected tags: {selected_tags}")
         print(f"Unknown tags: {unknown_tags}")
 
+
+    def _load_tags_for_current_image(self):
+        """Compatibility helper: reloads current image/tags using existing load path."""
+        if self.current_image_path:
+            self._load_and_display_image(self.current_image_path)
+
     def _update_index_label(self):
         """Updates the image index label."""
         if self.image_paths:
