@@ -684,15 +684,8 @@ class MainWindow(QMainWindow):
                 results = self.classifier_manager.analyze_image_sync(image_path, threshold=threshold)
                 tags = [name for name, score in results]
                 workfile_data["image_tags"][image_path] = tags
-
-                txt_path = os.path.splitext(image_path)[0] + ".txt"
-                spaced_tags = [FileOperations.convert_underscores_to_spaces(tag) for tag in tags]
-                with open(txt_path, 'w', encoding='utf-8') as f:
-                    f.write(", ".join(spaced_tags))
-
                 updated += 1
-            except Exception as e:
-                print(f"Bulk analyze failed for {image_path}: {e}")
+            except Exception:
                 errors += 1
 
         self.file_operations._save_json_file(
@@ -702,13 +695,13 @@ class MainWindow(QMainWindow):
 
         progress.setValue(len(image_paths))
 
-        if self.current_image_path:
-            self._load_and_display_image(self.current_image_path)
+        self._load_tags_for_current_image()
+        self._refresh_tag_panels_after_change()
 
         QMessageBox.information(
             self,
             "Bulk Analyze Complete",
-            f"Updated {updated} images (workfile + .txt captions).\nErrors: {errors}."
+            f"Updated {updated} images.\nErrors: {errors}."
         )
 
     def start_find_replace_text_operation(self):
@@ -731,8 +724,8 @@ class MainWindow(QMainWindow):
 
         result = progress_dialog.execute_operation(self.bulk_operations_manager, self.last_folder_path)
         if result and result.get('success'):
-            if self.current_image_path:
-                self._load_and_display_image(self.current_image_path)
+            self._reload_current_image()
+            self._refresh_tag_panels_after_change()
 
     def start_replace_tag_operation(self, source_tag_name):
         """Shows the replace tag dialog and executes the replacement if confirmed.
