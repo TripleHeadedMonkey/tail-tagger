@@ -42,7 +42,7 @@ from config_manager import ConfigManager
 from keyboard_manager import KeyboardManager
 from classifier_manager import ClassifierManager
 from tag_list_model import TagListModel, TagData
-from tail_tagger.bulk_operations import BulkOperationsManager, TagBulkOperationDialog, ReplaceTagDialog
+from tail_tagger.bulk_operations import BulkOperationsManager, TagBulkOperationDialog, ReplaceTagDialog, FindReplaceDialog
 
 from left_panel_container import LeftPanelContainer
 from center_panel import CenterPanel
@@ -52,8 +52,8 @@ from selected_tags_panel import SelectedTagsPanel
 app_start_time = time.time()
 import resources.resources_rc as resources_rc  
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QHBoxLayout, QFrame, QLabel, QSizePolicy, 
-                               QVBoxLayout, QPushButton, QSpacerItem, QFileDialog, QSplitter, QMessageBox)
-from PySide6.QtCore import Qt, QTimer, Slot, QUrl
+                               QVBoxLayout, QPushButton, QSpacerItem, QFileDialog, QSplitter, QMessageBox, QProgressDialog)
+from PySide6.QtCore import Qt, QTimer, Slot, QUrl, QEventLoop
 from PySide6.QtGui import QKeySequence, QShortcut, QIcon, QDesktopServices
 
 # TODO: its probably better for tag widget shading to not need every panel to rebuild their tag list and instead just 
@@ -100,6 +100,10 @@ class MainWindow(QMainWindow):
         self.keyboard_manager = KeyboardManager(self)
         self.classifier_manager = ClassifierManager(config_manager=self.config_manager, use_gpu=True)
         self.bulk_operations_manager = BulkOperationsManager(self.file_operations)
+
+        # Compatibility aliases for legacy/local bulk-flow call sites
+        self._load_tags_for_current_image = self._reload_current_image
+        self._refresh_tag_panels_after_change = self._reload_current_image
 
         # --- Auto-Analyze Timer ---
         self.auto_analyze_timer = QTimer(self)
@@ -165,6 +169,12 @@ class MainWindow(QMainWindow):
 
         export_action = file_menu.addAction("Export Tags...")
         export_action.triggered.connect(self._export_tags)
+
+        find_replace_action = file_menu.addAction("Find/Replace Tag Text in Folder...")
+        find_replace_action.triggered.connect(self.start_find_replace_text_operation)
+
+        bulk_analyze_action = file_menu.addAction("Bulk Analyze Folder with Active Model...")
+        bulk_analyze_action.triggered.connect(self.start_bulk_analyze_folder_operation)
         # --- End Menu Bar ---
 
         main_layout = QVBoxLayout(central_widget) # Set layout on central widget
@@ -350,6 +360,22 @@ class MainWindow(QMainWindow):
         print(f"Total tags in model: {total_tags}")
         print(f"Selected tags: {selected_tags}")
         print(f"Unknown tags: {unknown_tags}")
+
+
+    def _load_tags_for_current_image(self):
+        """Compatibility helper: reloads current image/tags using existing load path."""
+        if self.current_image_path:
+            self._load_and_display_image(self.current_image_path)
+
+    def _reload_current_image(self):
+        """Compatibility helper for legacy call sites."""
+        if self.current_image_path:
+            self._load_and_display_image(self.current_image_path)
+
+    def _refresh_tag_panels_after_change(self):
+        """Compatibility helper for legacy call sites."""
+        if self.current_image_path:
+            self._load_and_display_image(self.current_image_path)
 
     def _update_index_label(self):
         """Updates the image index label."""
@@ -626,6 +652,152 @@ class MainWindow(QMainWindow):
         if result and result.get('success'):
             print(f"Bulk operation completed successfully. Reloading current image to sync UI.")
             # Reload current image to refresh tag state
+            if self.current_image_path:
+                self._load_and_display_image(self.current_image_path)
+
+
+    def _analyze_and_apply_current_image_via_panel(self, threshold):
+        """Use the existing classifier panel Analyze + Apply flow for current image."""
+        panel = self.left_panel_container.classifier_panel
+        panel.threshold_spinbox.setValue(threshold)
+
+        loop = QEventLoop()
+        done = {'ok': False, 'error': None}
+
+        def on_finished(_results):
+            done['ok'] = True
+            if loop.isRunning():
+                loop.quit()
+
+        def on_error(msg):
+            done['error'] = msg
+            if loop.isRunning():
+                loop.quit()
+
+        self.classifier_manager.analysis_finished.connect(on_finished)
+        self.classifier_manager.error_occurred.connect(on_error)
+        try:
+            panel._handle_analyze_clicked()
+            loop.exec()
+        finally:
+            self.classifier_manager.analysis_finished.disconnect(on_finished)
+            self.classifier_manager.error_occurred.disconnect(on_error)
+
+        if not done['ok']:
+            raise RuntimeError(done['error'] or 'Analysis failed')
+
+        panel._handle_bulk_add_clicked()
+
+    def _save_current_image_tags_to_txt(self, image_path):
+        """Persist current selected tags to sidecar .txt for a specific image."""
+        base_txt_path = os.path.splitext(image_path)[0] + ".txt"
+        ext_txt_path = image_path + ".txt"
+        txt_path = ext_txt_path if os.path.exists(ext_txt_path) else base_txt_path
+
+        spaced_tags = [
+            FileOperations.convert_underscores_to_spaces(tag.name)
+            for tag in self.selected_tags_for_current_image
+        ]
+        with open(txt_path, 'w', encoding='utf-8') as f:
+            f.write(", ".join(spaced_tags))
+
+    def start_bulk_analyze_folder_operation(self):
+        """Automates existing analyze + apply flow for every image in the folder."""
+        if not self.last_folder_path or not os.path.isdir(self.last_folder_path):
+            QMessageBox.warning(self, "No Folder Loaded", "Please open an image folder first.")
+            return
+
+        threshold = self.config_manager.get_config_value("classifier_threshold")
+        if threshold is None:
+            threshold = 0.30
+        threshold = max(0.01, min(float(threshold), 0.95))
+
+        image_paths = list(self.image_paths)
+        if not image_paths:
+            QMessageBox.information(self, "No Images", "No images found in the current folder.")
+            return
+
+        model_id = self.classifier_manager.get_active_model_id() or "Unknown"
+        proceed = QMessageBox.question(
+            self,
+            "Bulk Analyze Folder",
+            f"Run Analyze + Apply on {len(image_paths)} images using '{model_id}' at threshold {threshold:.2f}?\n\n"
+            "This uses the same apply behavior as the classifier panel arrow button and updates caption .txt files.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        if proceed != QMessageBox.Yes:
+            return
+
+        progress = QProgressDialog("Analyzing and applying tags...", "Cancel", 0, len(image_paths), self)
+        progress.setWindowTitle("Bulk Analyze Folder")
+        progress.setWindowModality(Qt.WindowModal)
+        progress.show()
+
+        updated = 0
+        errors = 0
+        total_tags_added = 0
+
+        for i, image_path in enumerate(image_paths, start=1):
+            progress.setValue(i - 1)
+            progress.setLabelText(f"Processing {os.path.basename(image_path)} ({i}/{len(image_paths)})")
+            QApplication.processEvents()
+
+            if progress.wasCanceled():
+                break
+
+            try:
+                # 1) Load image/tags through existing app path
+                self._load_and_display_image(image_path)
+
+                # 2) Run existing Analyze + Apply panel flow
+                before_count = len(self.selected_tags_for_current_image)
+                self._analyze_and_apply_current_image_via_panel(threshold)
+                after_count = len(self.selected_tags_for_current_image)
+                total_tags_added += max(0, after_count - before_count)
+
+                # 3) Persist sidecar caption text
+                self._save_current_image_tags_to_txt(image_path)
+                updated += 1
+            except Exception as e:
+                print(f"Bulk Analyze apply flow failed for {image_path}: {e}")
+                errors += 1
+
+        progress.setValue(len(image_paths))
+
+        # Reload current image once at end
+        if self.current_image_path:
+            self._load_and_display_image(self.current_image_path)
+
+        QMessageBox.information(
+            self,
+            "Bulk Analyze Complete",
+            f"Processed {updated} images.\n"
+            f"Estimated tags added: {total_tags_added}.\n"
+            f"Threshold used: {threshold:.2f}.\n"
+            f"Errors: {errors}."
+        )
+
+    def start_find_replace_text_operation(self):
+        """Shows find/replace dialog and applies folder-wide text replacement inside tags."""
+        if not self.last_folder_path or not os.path.isdir(self.last_folder_path):
+            QMessageBox.warning(self, "No Folder Loaded", "Please open an image folder first.")
+            return
+
+        dialog = FindReplaceDialog(self)
+        if dialog.exec() != dialog.Accepted:
+            return
+
+        find_text, replace_text = dialog.get_values()
+        progress_dialog = TagBulkOperationDialog(
+            self,
+            'find_replace_text',
+            find_text,
+            replace_text=replace_text
+        )
+
+        result = progress_dialog.execute_operation(self.bulk_operations_manager, self.last_folder_path)
+        if result and result.get('success'):
             if self.current_image_path:
                 self._load_and_display_image(self.current_image_path)
 
