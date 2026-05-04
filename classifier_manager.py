@@ -259,6 +259,90 @@ class ClassifierManager(QObject):
             traceback.print_exc()
             self.error_occurred.emit(error_msg)
 
+
+    def ensure_model_loaded_sync(self):
+        """Ensures active model is loaded synchronously (blocking)."""
+        if self.model is not None and self.allowed_tags is not None:
+            return True
+
+        if not self.active_model_id or not self.model_path:
+            self.error_occurred.emit("No active classifier model is configured.")
+            return False
+
+        try:
+            if self.use_gpu_preference and torch.cuda.is_available():
+                device = torch.device("cuda")
+            else:
+                device = torch.device("cpu")
+
+            if self.active_model_id in ["JTP_PILOT", "JTP_PILOT2"]:
+                model, allowed_tags = load_jtp2_model(
+                    model_path=self.model_path,
+                    tags_path=self.tags_path,
+                    device=device,
+                    model_id=self.active_model_id
+                )
+                self.model_family = "jtp2"
+                self.preprocess_fn = preprocess_jtp2
+                self.inference_fn = run_inference_jtp2
+            elif self.active_model_id == "JTP-3":
+                model, allowed_tags = load_jtp3_model(
+                    model_path=self.model_path,
+                    device=device
+                )
+                self.model_family = "jtp3"
+                self.preprocess_fn = preprocess_jtp3
+                self.inference_fn = run_inference_jtp3
+            else:
+                raise RuntimeError(f"Unsupported model_id: {self.active_model_id}")
+
+            self.model = model
+            self.allowed_tags = allowed_tags
+            self.device = next(model.parameters()).device
+            return True
+        except Exception as e:
+            self.error_occurred.emit(f"Model load failed: {e}")
+            return False
+
+    def analyze_image_sync(self, image_path: str, threshold: float = 0.30) -> list[tuple[str, float]]:
+        """Analyze one image synchronously and return tags above threshold."""
+        if not self.ensure_model_loaded_sync():
+            return []
+
+        if self.model_family == "jtp2":
+            tensor = self.preprocess_fn(image_path).to(self.device)
+            probabilities = self.inference_fn(
+                model=self.model,
+                tensor=tensor,
+                device=self.device,
+                model_id=self.active_model_id
+            )
+        elif self.model_family == "jtp3":
+            patches, coords, valid = self.preprocess_fn(image_path)
+            probabilities = self.inference_fn(
+                model=self.model,
+                patches=patches,
+                coords=coords,
+                valid=valid,
+                device=self.device,
+                model_id=self.active_model_id
+            )
+        else:
+            return []
+
+        probabilities_cpu = probabilities.cpu()
+        indices = torch.where(probabilities_cpu > threshold)[0]
+        values = probabilities_cpu[indices]
+
+        results = []
+        for i in range(indices.size(0)):
+            tag_index = indices[i].item()
+            if 0 <= tag_index < len(self.allowed_tags):
+                results.append((self.allowed_tags[tag_index], values[i].item()))
+
+        results.sort(key=lambda x: x[1], reverse=True)
+        from tail_tagger.classifier_overrides import TagOverrideManager
+        return TagOverrideManager.apply_overrides(results, self.active_model_id)
     # Add this method to ClassifierManager
     def _discover_models(self) -> list[str]:
         """Scans the classifiers directory for valid, supported models."""
