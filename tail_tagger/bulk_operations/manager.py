@@ -240,6 +240,83 @@ class BulkOperationsManager:
                 'error': str(e)
             }
 
+
+    def find_replace_text_in_all_tags(self, folder_path, find_text, replace_text, progress_callback=None):
+        """Replaces substring text inside all tags across all images in the folder.
+
+        Args:
+            folder_path (str): Path to the image folder
+            find_text (str): Text to find inside each tag
+            replace_text (str): Replacement text (can be empty)
+            progress_callback (callable, optional): Callback function(phase, current, total, message)
+
+        Returns:
+            dict: Results with keys:
+                - 'success': bool
+                - 'updated_images': number of images where any tag changed
+                - 'updated_tags': number of tag strings changed
+                - 'total_images': total images processed
+                - 'error': error message if success is False
+        """
+        try:
+            if progress_callback:
+                progress_callback('init', 0, 0, 'Initializing workfile...')
+
+            workfile_data, initialized = self.file_operations.ensure_workfile_complete(
+                folder_path,
+                progress_callback=lambda cur, total: progress_callback('init', cur, total, f'Loading image data... ({cur}/{total})') if progress_callback else None
+            )
+
+            if not workfile_data.get("image_tags"):
+                return {
+                    'success': False,
+                    'updated_images': 0,
+                    'updated_tags': 0,
+                    'total_images': 0,
+                    'error': 'No images found in folder'
+                }
+
+            total_images = len(workfile_data["image_tags"])
+            updated_images = 0
+            updated_tags = 0
+
+            for index, (image_path, tags) in enumerate(workfile_data["image_tags"].items()):
+                if progress_callback:
+                    progress_callback('process', index + 1, total_images, f'Processing images... ({index + 1}/{total_images})')
+
+                changed_in_image = 0
+                for i, tag in enumerate(tags):
+                    if find_text in tag:
+                        new_tag = tag.replace(find_text, replace_text)
+                        if new_tag != tag:
+                            tags[i] = new_tag
+                            changed_in_image += 1
+
+                if changed_in_image > 0:
+                    updated_images += 1
+                    updated_tags += changed_in_image
+
+            if progress_callback:
+                progress_callback('process', total_images, total_images, 'Saving changes...')
+
+            self._save_workfile_with_backup(folder_path, workfile_data)
+
+            return {
+                'success': True,
+                'updated_images': updated_images,
+                'updated_tags': updated_tags,
+                'total_images': total_images,
+                'error': None
+            }
+
+        except Exception as e:
+            return {
+                'success': False,
+                'updated_images': 0,
+                'updated_tags': 0,
+                'total_images': 0,
+                'error': str(e)
+            }
     def _save_workfile_with_backup(self, folder_path, workfile_data):
         """Saves workfile with a timestamped backup.
 

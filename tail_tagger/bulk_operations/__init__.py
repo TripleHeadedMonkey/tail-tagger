@@ -19,6 +19,7 @@ from .tag_operations_dialog import (
     WorkerSignals
 )
 from .replace_tag_dialog import ReplaceTagDialog
+from .find_replace_dialog import FindReplaceDialog
 
 __all__ = [
     'BulkOperationsManager',
@@ -26,4 +27,5 @@ __all__ = [
     'BulkOperationWorker',
     'WorkerSignals',
     'ReplaceTagDialog',
+    'FindReplaceDialog',
 ]
