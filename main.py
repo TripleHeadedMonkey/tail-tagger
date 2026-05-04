@@ -641,21 +641,8 @@ class MainWindow(QMainWindow):
             if self.current_image_path:
                 self._load_and_display_image(self.current_image_path)
 
-    def _save_current_image_tags_to_txt(self, image_path):
-        """Persist current selected tags to sidecar .txt for a specific image."""
-        base_txt_path = os.path.splitext(image_path)[0] + ".txt"
-        ext_txt_path = image_path + ".txt"
-        txt_path = ext_txt_path if os.path.exists(ext_txt_path) else base_txt_path
-
-        spaced_tags = [
-            FileOperations.convert_underscores_to_spaces(tag.name)
-            for tag in self.selected_tags_for_current_image
-        ]
-        with open(txt_path, 'w', encoding='utf-8') as f:
-            f.write(", ".join(spaced_tags))
-
     def start_bulk_analyze_folder_operation(self):
-        """Automates existing analyze + apply flow for every image in the folder."""
+        """Runs classifier analysis on every image in the current folder and writes tags to workfile."""
         if not self.last_folder_path or not os.path.isdir(self.last_folder_path):
             QMessageBox.warning(self, "No Folder Loaded", "Please open an image folder first.")
             return
@@ -663,9 +650,11 @@ class MainWindow(QMainWindow):
         threshold = self.config_manager.get_config_value("classifier_threshold")
         if threshold is None:
             threshold = 0.30
-        threshold = max(0.01, min(float(threshold), 0.95))
 
-        image_paths = list(self.image_paths)
+        workfile_data, _ = self.file_operations.ensure_workfile_complete(self.last_folder_path)
+        image_map = workfile_data.get("image_tags", {})
+        image_paths = list(image_map.keys())
+
         if not image_paths:
             QMessageBox.information(self, "No Images", "No images found in the current folder.")
             return
@@ -674,66 +663,51 @@ class MainWindow(QMainWindow):
         proceed = QMessageBox.question(
             self,
             "Bulk Analyze Folder",
-            f"Run Analyze + Apply on {len(image_paths)} images using '{model_id}' at threshold {threshold:.2f}?\n\n"
-            "This uses the same apply behavior as the classifier panel arrow button and updates caption .txt files.",
+            f"Analyze {len(image_paths)} images using model '{model_id}' at threshold {threshold:.2f}?\n\n"
+            "This will overwrite workfile tags for each image. A workfile backup is recommended before running.",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
         )
         if proceed != QMessageBox.Yes:
             return
 
-        progress = QProgressDialog("Analyzing and applying tags...", "Cancel", 0, len(image_paths), self)
+        progress = QProgressDialog("Analyzing images...", "Cancel", 0, len(image_paths), self)
         progress.setWindowTitle("Bulk Analyze Folder")
         progress.setWindowModality(Qt.WindowModal)
         progress.show()
 
         updated = 0
         errors = 0
-        total_tags_added = 0
-
         for i, image_path in enumerate(image_paths, start=1):
             progress.setValue(i - 1)
-            progress.setLabelText(f"Processing {os.path.basename(image_path)} ({i}/{len(image_paths)})")
+            progress.setLabelText(f"Analyzing {os.path.basename(image_path)} ({i}/{len(image_paths)})")
             QApplication.processEvents()
 
             if progress.wasCanceled():
                 break
 
             try:
-                # 1) Load image/tags through existing app path
-                self._load_and_display_image(image_path)
-
-                # 2) Analyze with active model (same source as Analyze button)
                 results = self.classifier_manager.analyze_image_sync(image_path, threshold=threshold)
-                tag_names = [tag_name for tag_name, score in results if score >= threshold]
-
-                # 3) Apply tags using existing officialization method (same as arrow button)
-                before_count = len(self.selected_tags_for_current_image)
-                if tag_names:
-                    self.bulk_add_classifier_tags(tag_names)
-                after_count = len(self.selected_tags_for_current_image)
-                total_tags_added += max(0, after_count - before_count)
-
-                # 4) Persist sidecar caption text
-                self._save_current_image_tags_to_txt(image_path)
+                tags = [name for name, score in results]
+                workfile_data["image_tags"][image_path] = tags
                 updated += 1
-            except Exception as e:
-                print(f"Bulk Analyze apply flow failed for {image_path}: {e}")
+            except Exception:
                 errors += 1
+
+        self.file_operations._save_json_file(
+            self.file_operations.get_workfile_path(self.last_folder_path),
+            workfile_data
+        )
 
         progress.setValue(len(image_paths))
 
-        # Reload current image once at end
-        if self.current_image_path:
-            self._load_and_display_image(self.current_image_path)
+        self._load_tags_for_current_image()
+        self._refresh_tag_panels_after_change()
 
         QMessageBox.information(
             self,
             "Bulk Analyze Complete",
-            f"Processed {updated} images.\n"
-            f"Estimated tags added: {total_tags_added}.\n"
-            f"Threshold used: {threshold:.2f}.\n"
-            f"Errors: {errors}."
+            f"Updated {updated} images.\nErrors: {errors}."
         )
 
     def start_find_replace_text_operation(self):
@@ -756,8 +730,8 @@ class MainWindow(QMainWindow):
 
         result = progress_dialog.execute_operation(self.bulk_operations_manager, self.last_folder_path)
         if result and result.get('success'):
-            if self.current_image_path:
-                self._load_and_display_image(self.current_image_path)
+            self._reload_current_image()
+            self._refresh_tag_panels_after_change()
 
     def start_replace_tag_operation(self, source_tag_name):
         """Shows the replace tag dialog and executes the replacement if confirmed.
