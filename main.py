@@ -42,7 +42,7 @@ from config_manager import ConfigManager
 from keyboard_manager import KeyboardManager
 from classifier_manager import ClassifierManager
 from tag_list_model import TagListModel, TagData
-from tail_tagger.bulk_operations import BulkOperationsManager, TagBulkOperationDialog, ReplaceTagDialog
+from tail_tagger.bulk_operations import BulkOperationsManager, TagBulkOperationDialog, ReplaceTagDialog, FindReplaceDialog
 
 from left_panel_container import LeftPanelContainer
 from center_panel import CenterPanel
@@ -52,7 +52,7 @@ from selected_tags_panel import SelectedTagsPanel
 app_start_time = time.time()
 import resources.resources_rc as resources_rc  
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QHBoxLayout, QFrame, QLabel, QSizePolicy, 
-                               QVBoxLayout, QPushButton, QSpacerItem, QFileDialog, QSplitter, QMessageBox)
+                               QVBoxLayout, QPushButton, QSpacerItem, QFileDialog, QSplitter, QMessageBox, QProgressDialog)
 from PySide6.QtCore import Qt, QTimer, Slot, QUrl
 from PySide6.QtGui import QKeySequence, QShortcut, QIcon, QDesktopServices
 
@@ -165,6 +165,12 @@ class MainWindow(QMainWindow):
 
         export_action = file_menu.addAction("Export Tags...")
         export_action.triggered.connect(self._export_tags)
+
+        find_replace_action = file_menu.addAction("Find/Replace Tag Text in Folder...")
+        find_replace_action.triggered.connect(self.start_find_replace_text_operation)
+
+        bulk_analyze_action = file_menu.addAction("Bulk Analyze Folder with Active Model...")
+        bulk_analyze_action.triggered.connect(self.start_bulk_analyze_folder_operation)
         # --- End Menu Bar ---
 
         main_layout = QVBoxLayout(central_widget) # Set layout on central widget
@@ -626,6 +632,105 @@ class MainWindow(QMainWindow):
         if result and result.get('success'):
             print(f"Bulk operation completed successfully. Reloading current image to sync UI.")
             # Reload current image to refresh tag state
+            if self.current_image_path:
+                self._load_and_display_image(self.current_image_path)
+
+    def start_bulk_analyze_folder_operation(self):
+        """Runs classifier analysis on every image in the current folder and writes tags to workfile."""
+        if not self.last_folder_path or not os.path.isdir(self.last_folder_path):
+            QMessageBox.warning(self, "No Folder Loaded", "Please open an image folder first.")
+            return
+
+        threshold = self.config_manager.get_config_value("classifier_threshold")
+        if threshold is None:
+            threshold = 0.30
+
+        workfile_data, _ = self.file_operations.ensure_workfile_complete(self.last_folder_path)
+        image_map = workfile_data.get("image_tags", {})
+        image_paths = list(image_map.keys())
+
+        if not image_paths:
+            QMessageBox.information(self, "No Images", "No images found in the current folder.")
+            return
+
+        model_id = self.classifier_manager.get_active_model_id() or "Unknown"
+        proceed = QMessageBox.question(
+            self,
+            "Bulk Analyze Folder",
+            f"Analyze {len(image_paths)} images using model '{model_id}' at threshold {threshold:.2f}?\n\n"
+            "This will overwrite workfile tags for each image. A workfile backup is recommended before running.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        if proceed != QMessageBox.Yes:
+            return
+
+        progress = QProgressDialog("Analyzing images...", "Cancel", 0, len(image_paths), self)
+        progress.setWindowTitle("Bulk Analyze Folder")
+        progress.setWindowModality(Qt.WindowModal)
+        progress.show()
+
+        updated = 0
+        errors = 0
+        for i, image_path in enumerate(image_paths, start=1):
+            progress.setValue(i - 1)
+            progress.setLabelText(f"Analyzing {os.path.basename(image_path)} ({i}/{len(image_paths)})")
+            QApplication.processEvents()
+
+            if progress.wasCanceled():
+                break
+
+            try:
+                results = self.classifier_manager.analyze_image_sync(image_path, threshold=threshold)
+                tags = [name for name, score in results]
+                workfile_data["image_tags"][image_path] = tags
+
+                txt_path = os.path.splitext(image_path)[0] + ".txt"
+                spaced_tags = [FileOperations.convert_underscores_to_spaces(tag) for tag in tags]
+                with open(txt_path, 'w', encoding='utf-8') as f:
+                    f.write(", ".join(spaced_tags))
+
+                updated += 1
+            except Exception as e:
+                print(f"Bulk analyze failed for {image_path}: {e}")
+                errors += 1
+
+        self.file_operations._save_json_file(
+            self.file_operations.get_workfile_path(self.last_folder_path),
+            workfile_data
+        )
+
+        progress.setValue(len(image_paths))
+
+        if self.current_image_path:
+            self._load_and_display_image(self.current_image_path)
+
+        QMessageBox.information(
+            self,
+            "Bulk Analyze Complete",
+            f"Updated {updated} images (workfile + .txt captions).\nErrors: {errors}."
+        )
+
+    def start_find_replace_text_operation(self):
+        """Shows find/replace dialog and applies folder-wide text replacement inside tags."""
+        if not self.last_folder_path or not os.path.isdir(self.last_folder_path):
+            QMessageBox.warning(self, "No Folder Loaded", "Please open an image folder first.")
+            return
+
+        dialog = FindReplaceDialog(self)
+        if dialog.exec() != dialog.Accepted:
+            return
+
+        find_text, replace_text = dialog.get_values()
+        progress_dialog = TagBulkOperationDialog(
+            self,
+            'find_replace_text',
+            find_text,
+            replace_text=replace_text
+        )
+
+        result = progress_dialog.execute_operation(self.bulk_operations_manager, self.last_folder_path)
+        if result and result.get('success'):
             if self.current_image_path:
                 self._load_and_display_image(self.current_image_path)
 
