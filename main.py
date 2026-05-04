@@ -101,6 +101,10 @@ class MainWindow(QMainWindow):
         self.classifier_manager = ClassifierManager(config_manager=self.config_manager, use_gpu=True)
         self.bulk_operations_manager = BulkOperationsManager(self.file_operations)
 
+        # Compatibility aliases for legacy/local bulk-flow call sites
+        self._load_tags_for_current_image = self._reload_current_image
+        self._refresh_tag_panels_after_change = self._reload_current_image
+
         # --- Auto-Analyze Timer ---
         self.auto_analyze_timer = QTimer(self)
         self.auto_analyze_timer.setSingleShot(True) # Important: only fire once per start
@@ -356,6 +360,22 @@ class MainWindow(QMainWindow):
         print(f"Total tags in model: {total_tags}")
         print(f"Selected tags: {selected_tags}")
         print(f"Unknown tags: {unknown_tags}")
+
+
+    def _load_tags_for_current_image(self):
+        """Compatibility helper: reloads current image/tags using existing load path."""
+        if self.current_image_path:
+            self._load_and_display_image(self.current_image_path)
+
+    def _reload_current_image(self):
+        """Compatibility helper for legacy call sites."""
+        if self.current_image_path:
+            self._load_and_display_image(self.current_image_path)
+
+    def _refresh_tag_panels_after_change(self):
+        """Compatibility helper for legacy call sites."""
+        if self.current_image_path:
+            self._load_and_display_image(self.current_image_path)
 
     def _update_index_label(self):
         """Updates the image index label."""
