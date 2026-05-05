@@ -1,5 +1,7 @@
 # Tail Tagger
 
+Added a separate script for running JTP3 across all files in a folder.
+
 A desktop application built with PySide6 for manual and AI-assisted image tagging, designed for the furry community using the e621 tagging system. Features machine learning model integration for automatic tag suggestions and comprehensive tag management.
 
 This application is HEAVILY inspired by the amazing **[sd-tagging-helper](https://github.com/arenasys/sd-tagging-helper)** application, which I think has a fantastic workflow for manual and AI assisted image tagging. Unfortunately, it does not support more recent, greatly improved image classifiers, limiting the accuracy of AI assisted tagging suggestions. Thus, I created this app, mimicking the workflow and layout, but aimed towards e621 tagging and image classification.
