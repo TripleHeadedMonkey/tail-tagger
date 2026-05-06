@@ -325,7 +325,6 @@ class ClassifierManager(QObject):
                 coords=coords,
                 valid=valid,
                 device=self.device,
-                model_id=self.active_model_id
             )
         else:
             return []
