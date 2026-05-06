@@ -1,5 +1,6 @@
 import sys
 import os
+import subprocess
 
 def check_dependencies():
     """Verify critical dependencies can be imported."""
