@@ -214,3 +214,14 @@ You are free to fork the repo, request features/improvements and submit pull req
 
 - AI models provided by [RedRocket/JointTaggerProject](https://huggingface.co/RedRocket/JointTaggerProject)
 - Built with PySide6, PyTorch, and other open-source libraries
+
+
+### Dataset Editor Tool (Standalone, Paginated)
+
+Launch the standalone multi-entry paginated editor:
+
+```bash
+python dataset_editor_tool.py
+```
+
+Features include scrollable multi-row image/caption editing and double-click image to open in the OS preview app.
