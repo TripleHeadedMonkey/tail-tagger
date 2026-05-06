@@ -56,6 +56,21 @@ This application is HEAVILY inspired by the amazing **[sd-tagging-helper](https:
 That's it! The setup script automatically creates a virtual environment and installs all dependencies.
 
 ## Usage
+### Bulk Caption CLI (Standalone Tool)
+
+For fast folder-wide caption generation without using the GUI:
+
+```bash
+python bulk_caption_tool.py /path/to/images --model JTP-3 --threshold 0.20
+```
+
+Optional overwrite behavior:
+- `--overwrite-mode auto` (default): prefers existing `image.ext.txt`, else writes `image.txt`
+- `--overwrite-mode base`: always writes `image.txt`
+- `--overwrite-mode ext`: always writes `image.ext.txt`
+
+This tool uses the same project dependencies and classifier stack as the app.
+
 
 ### Running the Application
 
@@ -193,3 +208,14 @@ You are free to fork the repo, request features/improvements and submit pull req
 
 - AI models provided by [RedRocket/JointTaggerProject](https://huggingface.co/RedRocket/JointTaggerProject)
 - Built with PySide6, PyTorch, and other open-source libraries
+
+
+### Dataset Editor Tool (Standalone, Paginated)
+
+Launch the standalone multi-entry paginated editor:
+
+```bash
+python dataset_editor_tool.py
+```
+
+Features include scrollable multi-row image/caption editing and double-click image to open in the OS preview app.
